@@ -1,0 +1,6 @@
+{
+  "name": "Frota NRE de Maringá",
+  "description": "Aplicativo de gestão de frota de veículos do NRE de Maringá para motoristas registrarem saída, chegada, abastecimento e visualizar status da frota e histórico.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
