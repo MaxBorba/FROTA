@@ -20,6 +20,7 @@ import {
   FolderOpen,
   ExternalLink,
   AlertCircle,
+  MapPin,
 } from 'lucide-react';
 
 interface RefuelFormProps {
@@ -228,6 +229,33 @@ export const RefuelForm: React.FC<RefuelFormProps> = ({
           Voltar
         </button>
       </div>
+
+      {/* Quick link to accredited gas stations map */}
+      <a
+        href="https://www.google.com/maps/d/u/0/viewer?mid=1ROWBRq9hQr4lwjM5E28p2JEOyfjiUWs&ll=-23.416769991918358%2C-51.9236281&z=13"
+        target="_blank"
+        rel="noopener noreferrer"
+        id="btn-refuel-view-postos-map"
+        className="bg-rose-50 hover:bg-rose-100/90 border border-rose-300 text-rose-950 rounded-2xl p-3 flex items-center justify-between transition shadow-xs group"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-rose-500 text-white rounded-xl shadow-xs group-hover:scale-105 transition-transform">
+            <MapPin className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-xs font-black block text-rose-950">
+              Consultar Postos Credenciados (Mapa Google)
+            </span>
+            <span className="text-[11px] text-rose-700">
+              Ver mapa da rede credenciada NRE Maringá
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 text-xs font-bold text-rose-600 group-hover:text-rose-700">
+          <span>Abrir Mapa</span>
+          <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition" />
+        </div>
+      </a>
 
       {successMsg && (
         <div className="bg-emerald-500 text-white p-4 rounded-2xl shadow-lg flex items-center gap-3 animate-fade-in">

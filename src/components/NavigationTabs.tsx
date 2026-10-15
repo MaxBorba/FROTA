@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, LogOut, CheckCircle2, Fuel, Car, History, ShieldCheck, Lock } from 'lucide-react';
+import { Home, LogOut, CheckCircle2, Fuel, Car, History, ShieldCheck, Lock, MapPin } from 'lucide-react';
 
-export type AppView = 'home' | 'checkout' | 'checkin' | 'refuel' | 'status' | 'trips' | 'admin';
+export type AppView = 'home' | 'checkout' | 'checkin' | 'refuel' | 'postos' | 'status' | 'trips' | 'admin';
 
 interface NavigationTabsProps {
   currentView: AppView;
@@ -42,6 +42,14 @@ export const NavigationTabs: React.FC<NavigationTabsProps> = ({
       shortLabel: 'Abastecer',
       icon: <Fuel className="w-4 h-4" />,
       colorClass: 'hover:text-amber-400',
+    },
+    {
+      id: 'postos',
+      label: 'POSTOS',
+      shortLabel: 'POSTOS',
+      icon: <MapPin className="w-4 h-4 text-rose-400" />,
+      colorClass: 'hover:text-rose-400',
+      badge: 'Mapa',
     },
     {
       id: 'status',

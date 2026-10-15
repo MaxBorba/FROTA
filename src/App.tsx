@@ -8,6 +8,7 @@ import { ArrivalForm } from './components/ArrivalForm';
 import { RefuelForm } from './components/RefuelForm';
 import { VehicleStatusView } from './components/VehicleStatusView';
 import { DriverTripsView } from './components/DriverTripsView';
+import { GasStationsView } from './components/GasStationsView';
 import { SheetsSyncModal } from './components/SheetsSyncModal';
 import { AdminModal } from './components/AdminModal';
 import { NotificationToastContainer } from './components/NotificationToastContainer';
@@ -820,6 +821,13 @@ export default function App() {
             recentTrips={recentTrips}
             onBack={() => setCurrentView('home')}
             onSubmit={handleRefuelSubmit}
+          />
+        )}
+
+        {currentView === 'postos' && (
+          <GasStationsView
+            onBack={() => setCurrentView('home')}
+            onSelectRefuel={() => setCurrentView('refuel')}
           />
         )}
 

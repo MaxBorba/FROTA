@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { DriverTripEntry, Vehicle } from '../types';
 import { DRIVE_FOLDERS } from '../data/driveConfig';
-import { LogOut, LogIn, Fuel, Car, History, Clock, User, Gauge, ShieldCheck, CheckCircle, AlertCircle, Wrench, FolderOpen, ExternalLink, Lock, Trash2, CheckCircle2, X } from 'lucide-react';
+import { LogOut, LogIn, Fuel, Car, History, Clock, User, Gauge, ShieldCheck, CheckCircle, AlertCircle, Wrench, FolderOpen, ExternalLink, Lock, Trash2, CheckCircle2, X, MapPin } from 'lucide-react';
 
 interface HomeViewProps {
-  onSelectAction: (action: 'checkout' | 'checkin' | 'refuel' | 'status' | 'trips' | 'admin') => void;
+  onSelectAction: (action: 'checkout' | 'checkin' | 'refuel' | 'status' | 'trips' | 'admin' | 'postos') => void;
   onOpenAdminModal?: () => void;
   recentTrips: DriverTripEntry[];
   vehicles: Vehicle[];
@@ -277,7 +277,32 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </svg>
         </button>
 
-        {/* 4. MOSTRAR O STATUS DOS CARROS DA FROTA - Black #022022 */}
+        {/* 4. POSTOS CREDENCIADOS (MAPA DE ABASTECIMENTO) - Rose #e11d48 */}
+        <button
+          onClick={() => onSelectAction('postos')}
+          id="btn-action-postos"
+          style={{ backgroundColor: '#e11d48' }}
+          className="w-full text-white p-4 rounded-2xl shadow-md hover:shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="bg-white/20 p-3 rounded-xl backdrop-blur-sm group-hover:scale-110 transition-transform">
+              <MapPin className="w-6 h-6 text-white" />
+            </div>
+            <div className="text-left">
+              <span className="block font-black text-base tracking-tight leading-tight">
+                POSTOS CREDENCIADOS (MAPA)
+              </span>
+              <span className="text-xs text-white/80 font-normal">
+                Ver rede credenciada de abastecimento no Google Maps
+              </span>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-white/80 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        {/* 5. MOSTRAR O STATUS DOS CARROS DA FROTA - Black #022022 */}
         <button
           onClick={() => onSelectAction('status')}
           id="btn-action-status"
