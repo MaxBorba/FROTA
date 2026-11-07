@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DriverTripEntry } from '../types';
 import { DRIVE_FOLDERS } from '../data/driveConfig';
-import { ArrowLeft, History, Fuel, Calendar, Clock, Car, Search, Filter, Camera, ExternalLink, X, FolderOpen, Trash2, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { getDeviceLocalAudit, SIX_MONTHS_DAYS } from '../utils/fleetPersistence';
+import { ArrowLeft, History, Fuel, Calendar, Clock, Car, Search, Filter, Camera, ExternalLink, X, FolderOpen, Trash2, Lock, AlertCircle, CheckCircle2, Smartphone, Shield, Check, Info } from 'lucide-react';
 
 interface DriverTripsViewProps {
   recentTrips: DriverTripEntry[];
@@ -19,6 +20,12 @@ export const DriverTripsView: React.FC<DriverTripsViewProps> = ({
   const [driverFilter, setDriverFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [viewScope, setViewScope] = useState<'all' | 'device'>('all');
+  const [deviceRecords, setDeviceRecords] = useState<DriverTripEntry[]>(() => getDeviceLocalAudit());
+
+  useEffect(() => {
+    setDeviceRecords(getDeviceLocalAudit());
+  }, [recentTrips]);
 
   // Admin delete modal state
   const [deletingTrip, setDeletingTrip] = useState<DriverTripEntry | null>(null);
@@ -27,12 +34,15 @@ export const DriverTripsView: React.FC<DriverTripsViewProps> = ({
   const [deleteSuccess, setDeleteSuccess] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Active base trips depending on viewScope
+  const activeTripsBase = viewScope === 'device' ? deviceRecords : recentTrips;
+
   // Get list of unique drivers for filter dropdown
   const uniqueDrivers = Array.from(
-    new Set(recentTrips.map(t => t.driver).filter(Boolean))
+    new Set(activeTripsBase.map(t => t.driver).filter(Boolean))
   );
 
-  const filteredTrips = recentTrips.filter(t => {
+  const filteredTrips = activeTripsBase.filter(t => {
     if (driverFilter && !t.driver.toLowerCase().includes(driverFilter.toLowerCase())) {
       return false;
     }
@@ -108,6 +118,65 @@ export const DriverTripsView: React.FC<DriverTripsViewProps> = ({
           Voltar
         </button>
       </div>
+
+      {/* 6-Month Device Persistence Guarantee Banner */}
+      <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white p-3.5 rounded-2xl shadow-sm border border-purple-500/30 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+              Persistência Garantida por 6 Meses ({SIX_MONTHS_DAYS} dias)
+            </span>
+          </div>
+          <span className="text-[10px] font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+            Ativo no Aparelho
+          </span>
+        </div>
+        <p className="text-[11px] text-purple-100/90 leading-relaxed">
+          Os registros efetuados permanecem salvos no próprio aparelho (Android, iPhone Safari ou Windows) e sincronizados em tempo real com toda a frota. Os dados não somem ao fechar o app e só expiram após 6 meses ou mediante exclusão pelo articulador com a Chave Mestre.
+        </p>
+
+        {/* View Scope Toggle (Toda a Frota vs Registros Deste Aparelho) */}
+        <div className="grid grid-cols-2 gap-1.5 pt-1">
+          <button
+            type="button"
+            onClick={() => setViewScope('all')}
+            className={`py-2 px-2.5 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+              viewScope === 'all'
+                ? 'bg-white text-purple-950 shadow-sm'
+                : 'bg-white/10 text-white/80 hover:bg-white/20'
+            }`}
+          >
+            <Car className="w-3.5 h-3.5 text-purple-600" />
+            <span>Toda a Frota ({recentTrips.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewScope('device')}
+            className={`py-2 px-2.5 rounded-xl text-xs font-black transition flex items-center justify-center gap-1.5 ${
+              viewScope === 'device'
+                ? 'bg-emerald-400 text-slate-950 shadow-sm font-black'
+                : 'bg-white/10 text-white/80 hover:bg-white/20'
+            }`}
+          >
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Deste Aparelho ({deviceRecords.length})</span>
+          </button>
+        </div>
+      </div>
+
+      {viewScope === 'device' && (
+        <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-3 text-emerald-950 text-xs space-y-1 shadow-2xs">
+          <div className="flex items-center gap-2 font-black">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>Conferência do Motorista (Lançamentos Deste Dispositivo)</span>
+          </div>
+          <p className="text-[11px] text-emerald-800 leading-tight">
+            Estes registros foram preenchidos a partir deste celular/computador e estão guardados na memória local para sua conferência e prestação de contas.
+          </p>
+        </div>
+      )}
 
       {/* Google Drive 3 Folders Quick Access Bar */}
       <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-2xs space-y-2">
@@ -266,7 +335,9 @@ export const DriverTripsView: React.FC<DriverTripsViewProps> = ({
                   <th className="p-3">Motivo</th>
                   <th className="p-3">Combustível</th>
                   <th className="p-3 text-center">Foto</th>
-                  <th className="p-3 text-center">Apagar</th>
+                  {isAdminAuthenticated && (
+                    <th className="p-3 text-center">Apagar</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -349,27 +420,40 @@ export const DriverTripsView: React.FC<DriverTripsViewProps> = ({
                         <span className="text-slate-300 text-[10px]">-</span>
                       )}
                     </td>
-                    <td className="p-3 text-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeletingTrip(trip);
-                          setDeleteKeyInput('');
-                          setDeleteError(null);
-                          setDeleteSuccess(null);
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                        title={`Apagar registro de ${trip.type} do ${trip.vehicle} (Requer Chave Mestre)`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
+                    {isAdminAuthenticated && (
+                      <td className="p-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeletingTrip(trip);
+                            setDeleteKeyInput('');
+                            setDeleteError(null);
+                            setDeleteSuccess(null);
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                          title={`Apagar registro de ${trip.type} do ${trip.vehicle} (Requer Chave Mestre)`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+
+        {/* Driver Security & Integrity Notice Footer */}
+        <div className="p-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+          <span className="flex items-center gap-1.5 font-medium">
+            <Shield className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+            <span>Exclusão e correção de dados restritas à <strong>Aba Admin</strong> com Chave Mestre.</span>
+          </span>
+          <span className="text-[10px] text-slate-400 hidden sm:inline">
+            Validade: 6 meses na memória
+          </span>
+        </div>
       </div>
 
       {/* Voltar button in blue #27a3df */}

@@ -1,0 +1,128 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common security helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'maxborba71@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Vehicle validation
+    function isValidVehicle(data) {
+      return data.id is string && data.id.size() <= 64 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.plate is string && data.plate.size() <= 20 &&
+             data.odometer is number &&
+             data.status in ['AVAILABLE', 'UNAVAILABLE', 'MAINTENANCE'];
+    }
+
+    // Driver Trip validation (Permanent records)
+    function isValidTrip(data) {
+      return data.id is string && data.id.size() <= 64 &&
+             data.type in ['SAÍDA', 'CHEGADA', 'ABASTECIMENTO'] &&
+             data.vehicle is string && data.vehicle.size() <= 100 &&
+             data.driver is string && data.driver.size() <= 100 &&
+             data.date is string && data.date.size() <= 30 &&
+             data.time is string && data.time.size() <= 30 &&
+             data.timestamp is number;
+    }
+
+    // Access Log validation
+    function isValidAccessLog(data) {
+      return data.id is string && data.id.size() <= 64 &&
+             data.timestamp is number &&
+             data.date is string && data.date.size() <= 30 &&
+             data.time is string && data.time.size() <= 30 &&
+             data.action is string && data.action.size() <= 100;
+    }
+
+    // 1. Vehicles Collection
+    match /vehicles/{vehicleId} {
+      allow read: if true;
+      allow create: if isValidId(vehicleId) && isValidVehicle(incoming());
+      allow update: if isValidId(vehicleId) && (
+        isAdmin() ||
+        isValidVehicle(incoming())
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 2. Driver Trips Collection (Diretriz de Persistência Permanente)
+    match /trips/{tripId} {
+      allow read: if true;
+      allow create: if isValidId(tripId) && isValidTrip(incoming());
+      allow update: if isValidId(tripId) && (
+        isAdmin() ||
+        (isValidTrip(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['details', 'photoUrl', 'driveUrl', 'passengers', 'visitCity', 'visitLocation', 'visitReason']))
+      );
+      // Only authorized Admin can delete trips (Permanent records retention)
+      allow delete: if isAdmin();
+    }
+
+    // 3. Access Logs (Append-only audit trail)
+    match /accessLogs/{logId} {
+      allow read: if true;
+      allow create: if isValidId(logId) && isValidAccessLog(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    // 4. Active Checkouts (Temporary checkout session tracker)
+    match /activeCheckouts/{checkoutId} {
+      allow read: if true;
+      allow create, update: if isValidId(checkoutId);
+      allow delete: if true;
+    }
+
+    // 5. Users Collection
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isValidId(userId) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid == userId && (!('role' in incoming()) || incoming().role != 'admin'))
+      );
+      allow update: if isValidId(userId) && (
+        isAdmin() ||
+        (isSignedIn() && request.auth.uid == userId && (!incoming().diff(existing()).affectedKeys().hasAny(['role'])))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // 6. Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update: if isValidId(notificationId);
+      allow delete: if isAdmin();
+    }
+
+    // 7. Admins Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

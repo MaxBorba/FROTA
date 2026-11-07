@@ -7,6 +7,29 @@ import { INITIAL_VEHICLES, INITIAL_RECENT_TRIPS } from './src/data/initialData.j
 const app = express();
 const PORT = 3000;
 const MASTER_KEY = '192026';
+const SIX_MONTHS_DAYS = 180;
+const SIX_MONTHS_MS = SIX_MONTHS_DAYS * 24 * 60 * 60 * 1000; // 180 days in ms
+
+function isWithinSixMonths(timestamp?: number, dateStr?: string): boolean {
+  const now = Date.now();
+  const sixMonthsAgo = now - SIX_MONTHS_MS;
+  if (typeof timestamp === 'number' && timestamp > 0) {
+    return timestamp >= sixMonthsAgo;
+  }
+  if (dateStr && typeof dateStr === 'string') {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const parsedTime = new Date(year, month, day).getTime();
+      if (!isNaN(parsedTime)) {
+        return parsedTime >= sixMonthsAgo;
+      }
+    }
+  }
+  return true;
+}
 
 app.use(express.json({ limit: '50mb' }));
 
@@ -1328,6 +1351,61 @@ app.post('/api/fleet/admin/delete-trip', (req, res) => {
     updatedVehicles: store.vehicles,
     accessLogs: store.accessLogs,
     deletedTripIds: store.deletedTripIds,
+  });
+});
+
+// 7.0.1 Admin Update / Correct Trip Record (Apenas Administrador com Chave Mestre 192026)
+app.post('/api/fleet/admin/update-trip', (req, res) => {
+  const { masterKey, tripId, updates } = req.body;
+  if (masterKey !== MASTER_KEY) {
+    return res.status(401).json({ error: 'Chave mestre incorreta. Apenas o Administrador pode corrigir registros.' });
+  }
+
+  if (!tripId || !updates) {
+    return res.status(400).json({ error: 'ID do registro e dados de atualização são obrigatórios.' });
+  }
+
+  const tripIdx = store.driverTrips.findIndex(t => t.id === tripId);
+  if (tripIdx === -1) {
+    return res.status(404).json({ error: 'Registro não encontrado.' });
+  }
+
+  const prevTrip = store.driverTrips[tripIdx];
+  const updatedTrip = {
+    ...prevTrip,
+    ...updates,
+    details: updates.visitReason
+      ? `${updates.visitCity || prevTrip.visitCity || ''} (${updates.visitLocation || prevTrip.visitLocation || ''}): ${updates.visitReason}`
+      : prevTrip.details,
+  };
+
+  store.driverTrips[tripIdx] = updatedTrip;
+
+  // Also update in corresponding arrays
+  const depIdx = (store.departures || []).findIndex(d => d.id === tripId);
+  if (depIdx !== -1) store.departures[depIdx] = { ...store.departures[depIdx], ...updates };
+
+  const arrIdx = (store.arrivals || []).findIndex(a => a.id === tripId);
+  if (arrIdx !== -1) store.arrivals[arrIdx] = { ...store.arrivals[arrIdx], ...updates };
+
+  const refIdx = (store.refuels || []).findIndex(r => r.id === tripId);
+  if (refIdx !== -1) store.refuels[refIdx] = { ...store.refuels[refIdx], ...updates };
+
+  addAccessLog(
+    'Admin: Correção de Registro',
+    getClientIp(req),
+    req.headers['user-agent'] || '',
+    `Correção no registro ${updatedTrip.type} (${updatedTrip.vehicle}) - Motorista: ${updatedTrip.driver}, KM: ${updatedTrip.km}`,
+    'Administrador'
+  );
+
+  saveStore(store);
+
+  return res.json({
+    success: true,
+    updatedTrip,
+    recentTrips: store.driverTrips,
+    accessLogs: store.accessLogs,
   });
 });
 

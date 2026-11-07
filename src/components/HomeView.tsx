@@ -483,7 +483,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     >
                       {item.type}
                     </span>
-                    {onDeleteTrip && (
+                    {onDeleteTrip && isAdminAuthenticated && (
                       <button
                         type="button"
                         onClick={() => {

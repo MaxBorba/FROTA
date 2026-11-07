@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Vehicle, DriverTripEntry, FuelLevel, VehicleStatus, AppNotification, AccessLogEntry } from '../types';
 import { validateKm } from '../utils/validators';
-import { ShieldCheck, Lock, CheckCircle2, AlertCircle, X, RefreshCw, Trash2, Fuel, Gauge, User, Car, Wrench, AlertTriangle, Send, Bell, Radio, Sparkles, Activity, Search, Calendar, Download, Smartphone, Laptop, Globe, CheckSquare, Square, Share2, Copy, ArrowLeft, LogOut, FileSpreadsheet, Printer, FileText, ExternalLink, FolderOpen } from 'lucide-react';
+import { ShieldCheck, Lock, CheckCircle2, AlertCircle, X, RefreshCw, Trash2, Fuel, Gauge, User, Car, Wrench, AlertTriangle, Send, Bell, Radio, Sparkles, Activity, Search, Calendar, Download, Smartphone, Laptop, Globe, CheckSquare, Square, Share2, Copy, ArrowLeft, LogOut, FileSpreadsheet, Printer, FileText, ExternalLink, FolderOpen, Edit3, Save } from 'lucide-react';
 
 interface AdminModalProps {
   isOpen: boolean;
@@ -33,6 +33,7 @@ interface AdminModalProps {
   onReleaseAllVehicles: () => Promise<boolean>;
   onResetOdometers?: () => Promise<boolean>;
   onDeleteTrip: (tripId: string, masterKey?: string) => Promise<boolean>;
+  onUpdateTrip?: (tripId: string, updates: Partial<DriverTripEntry>, masterKey?: string) => Promise<boolean>;
   onClearAllHistory?: (masterKey?: string) => Promise<boolean>;
   onClearAccessLogs?: () => Promise<boolean>;
   onBroadcastNotification?: (data: {
@@ -58,6 +59,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onReleaseAllVehicles,
   onResetOdometers,
   onDeleteTrip,
+  onUpdateTrip,
   onClearAllHistory,
   onClearAccessLogs,
   onBroadcastNotification,
@@ -119,6 +121,66 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   // Link copy state
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Admin Trip Correction state
+  const [editingTrip, setEditingTrip] = useState<DriverTripEntry | null>(null);
+  const [tripEditKm, setTripEditKm] = useState<string>('');
+  const [tripEditDriver, setTripEditDriver] = useState<string>('');
+  const [tripEditPassengers, setTripEditPassengers] = useState<string>('');
+  const [tripEditCity, setTripEditCity] = useState<string>('');
+  const [tripEditLocation, setTripEditLocation] = useState<string>('');
+  const [tripEditReason, setTripEditReason] = useState<string>('');
+  const [tripEditDate, setTripEditDate] = useState<string>('');
+  const [tripEditTime, setTripEditTime] = useState<string>('');
+  const [tripEditFuel, setTripEditFuel] = useState<string>('');
+  const [tripEditLiters, setTripEditLiters] = useState<string>('');
+  const [isSavingTripEdit, setIsSavingTripEdit] = useState<boolean>(false);
+
+  const handleStartEditTrip = (trip: DriverTripEntry) => {
+    setEditingTrip(trip);
+    setTripEditKm(trip.km !== undefined && trip.km !== null ? String(trip.km) : '');
+    setTripEditDriver(trip.driver || '');
+    setTripEditPassengers(trip.passengers || '');
+    setTripEditCity(trip.visitCity || '');
+    setTripEditLocation(trip.visitLocation || '');
+    setTripEditReason(trip.visitReason || trip.details || '');
+    setTripEditDate(trip.date || '');
+    setTripEditTime(trip.time || '');
+    setTripEditFuel(trip.fuelLevel || '');
+    setTripEditLiters(trip.liters !== undefined && trip.liters !== null ? String(trip.liters) : '');
+  };
+
+  const handleSaveTripEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrip || !onUpdateTrip) return;
+    setIsSavingTripEdit(true);
+    try {
+      const updates: Partial<DriverTripEntry> = {
+        km: tripEditKm ? Number(tripEditKm.replace(/\./g, '').replace(/,/g, '.').trim()) : undefined,
+        driver: tripEditDriver,
+        passengers: tripEditPassengers,
+        visitCity: tripEditCity,
+        visitLocation: tripEditLocation,
+        visitReason: tripEditReason,
+        date: tripEditDate,
+        time: tripEditTime,
+        fuelLevel: tripEditFuel || undefined,
+        liters: tripEditLiters ? Number(tripEditLiters.replace(',', '.')) : undefined,
+      };
+      const success = await onUpdateTrip(editingTrip.id, updates, '192026');
+      if (success) {
+        setFeedbackMsg(`Registro de ${editingTrip.vehicle} corrigido com sucesso pelo Administrador!`);
+        setEditingTrip(null);
+        setTimeout(() => setFeedbackMsg(null), 3000);
+      } else {
+        alert('Não foi possível salvar as alterações no registro.');
+      }
+    } catch (err) {
+      alert('Erro ao salvar correções.');
+    } finally {
+      setIsSavingTripEdit(false);
+    }
+  };
 
   if (!isOpen && !embedded) return null;
 
@@ -1860,18 +1922,168 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               )}
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTripRecord(trip.id)}
-                            id={`btn-delete-trip-${trip.id}`}
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                            title="Excluir Registro"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditTrip(trip)}
+                              id={`btn-edit-trip-${trip.id}`}
+                              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                              title="Corrigir Dados deste Registro (Apenas Administrador)"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTripRecord(trip.id)}
+                              id={`btn-delete-trip-${trip.id}`}
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                              title="Excluir Registro (Apenas Administrador)"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       ))
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Admin Trip Correction Modal */}
+              {editingTrip && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl max-w-lg w-full p-5 space-y-4 shadow-2xl border border-slate-200 animate-fade-in max-h-[90vh] overflow-y-auto">
+                    <div className="flex items-center justify-between border-b pb-3">
+                      <div className="flex items-center gap-2 text-indigo-700 font-black text-sm">
+                        <Edit3 className="w-5 h-5" />
+                        <span>Corrigir Registro ({editingTrip.type} - {editingTrip.vehicle})</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingTrip(null)}
+                        className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleSaveTripEdit} className="space-y-3 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Data:</label>
+                          <input
+                            type="text"
+                            value={tripEditDate}
+                            onChange={(e) => setTripEditDate(e.target.value)}
+                            placeholder="DD/MM/AAAA"
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Hora:</label>
+                          <input
+                            type="text"
+                            value={tripEditTime}
+                            onChange={(e) => setTripEditTime(e.target.value)}
+                            placeholder="HH:MM"
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Motorista / Condutor:</label>
+                          <input
+                            type="text"
+                            value={tripEditDriver}
+                            onChange={(e) => setTripEditDriver(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Odômetro (KM):</label>
+                          <input
+                            type="text"
+                            value={tripEditKm}
+                            onChange={(e) => setTripEditKm(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Acompanhantes:</label>
+                        <input
+                          type="text"
+                          value={tripEditPassengers}
+                          onChange={(e) => setTripEditPassengers(e.target.value)}
+                          placeholder="Nenhum ou nomes..."
+                          className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Cidade Destino:</label>
+                          <input
+                            type="text"
+                            value={tripEditCity}
+                            onChange={(e) => setTripEditCity(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Local / Escola:</label>
+                          <input
+                            type="text"
+                            value={tripEditLocation}
+                            onChange={(e) => setTripEditLocation(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Motivo da Viagem / Operação:</label>
+                        <textarea
+                          rows={2}
+                          value={tripEditReason}
+                          onChange={(e) => setTripEditReason(e.target.value)}
+                          className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+
+                      {editingTrip.type === 'ABASTECIMENTO' && (
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Litros Abastecidos:</label>
+                          <input
+                            type="text"
+                            value={tripEditLiters}
+                            onChange={(e) => setTripEditLiters(e.target.value)}
+                            className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl font-bold"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2 pt-2 border-t">
+                        <button
+                          type="button"
+                          onClick={() => setEditingTrip(null)}
+                          className="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingTripEdit}
+                          className="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl text-xs shadow-md transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>{isSavingTripEdit ? 'Salvando...' : 'Salvar Correção'}</span>
+                        </button>
+                      </div>
+                    </form>
                   </div>
                 </div>
               )}

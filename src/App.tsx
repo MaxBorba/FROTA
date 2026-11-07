@@ -14,6 +14,10 @@ import { AdminModal } from './components/AdminModal';
 import { NotificationToastContainer } from './components/NotificationToastContainer';
 import { NotificationCenterModal } from './components/NotificationCenterModal';
 import { NavigationTabs, AppView } from './components/NavigationTabs';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { usePWAInstall } from './hooks/usePWAInstall';
+import { OfflineStatusIndicator } from './components/OfflineStatusIndicator';
+import { PWAInstallModal } from './components/PWAInstallModal';
 import {
   loadNotificationSettings,
   saveNotificationSettings,
@@ -33,11 +37,27 @@ import {
   savePersistedAccessLogs,
   getPersistedDeletedTripIds,
   savePersistedDeletedTripIds,
+  saveDeviceLocalAudit,
+  isWithinSixMonths,
   markTripAsDeleted,
   clearPersistedHistory,
   mergeTrips,
   mergeVehicles,
 } from './utils/fleetPersistence';
+import {
+  seedFirestoreIfEmpty,
+  subscribeVehicles,
+  subscribeTrips,
+  subscribeTombstones,
+  subscribeAccessLogs,
+  saveDepartureFirestore,
+  saveArrivalFirestore,
+  saveRefuelFirestore,
+  updateTripFirestore,
+  deleteTripFirestore,
+  clearAllTripsFirestore,
+  updateVehicleFirestore,
+} from './firebase/firestoreService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('home');
@@ -59,6 +79,19 @@ export default function App() {
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // PWA & Offline connectivity hooks
+  const { isOnline, wasOffline } = useOnlineStatus();
+  const {
+    isInstalled,
+    canPromptDirectly,
+    isIOS,
+    isAndroid,
+    isWindows,
+    isInstallModalOpen,
+    setIsInstallModalOpen,
+    promptInstall,
+  } = usePWAInstall();
 
   // Sync state to local storage whenever modified
   useEffect(() => {
@@ -180,6 +213,58 @@ export default function App() {
     }
   };
 
+  // Initial Firestore seed & real-time listeners for live synchronization
+  useEffect(() => {
+    seedFirestoreIfEmpty().catch((err) => {
+      console.warn('Initial Firestore seeding:', err);
+    });
+
+    const unsubVehicles = subscribeVehicles((firestoreVehicles) => {
+      if (firestoreVehicles && firestoreVehicles.length > 0) {
+        setVehicles(firestoreVehicles);
+        savePersistedVehicles(firestoreVehicles);
+      }
+    });
+
+    const unsubTrips = subscribeTrips((firestoreTrips) => {
+      if (firestoreTrips) {
+        const deletedSet = getPersistedDeletedTripIds();
+        const cleanTrips = firestoreTrips.filter(
+          t => !deletedSet.has(t.id) && isWithinSixMonths(t.timestamp, t.date)
+        );
+        setRecentTrips(cleanTrips);
+        savePersistedTrips(cleanTrips);
+      }
+    });
+
+    const unsubTombstones = subscribeTombstones((tombstones) => {
+      if (tombstones && tombstones.length > 0) {
+        const localDeleted = getPersistedDeletedTripIds();
+        tombstones.forEach(id => localDeleted.add(id));
+        savePersistedDeletedTripIds(localDeleted);
+        setRecentTrips(prev => {
+          const clean = prev.filter(t => !localDeleted.has(t.id));
+          savePersistedTrips(clean);
+          return clean;
+        });
+      }
+    });
+
+    const unsubLogs = subscribeAccessLogs((firestoreLogs) => {
+      if (firestoreLogs && firestoreLogs.length > 0) {
+        setAccessLogs(firestoreLogs);
+        savePersistedAccessLogs(firestoreLogs);
+      }
+    });
+
+    return () => {
+      unsubVehicles();
+      unsubTrips();
+      unsubTombstones();
+      unsubLogs();
+    };
+  }, []);
+
   // Initial load and periodic polling every 2 seconds for real-time multi-user synchronization
   useEffect(() => {
     fetchFleetData();
@@ -223,6 +308,50 @@ export default function App() {
     visitReason: string;
     receiptImage?: string | null;
   }) => {
+    const tripId = 'dep_' + Date.now();
+    const newEntry: DriverTripEntry = {
+      id: tripId,
+      type: 'SAÍDA',
+      vehicle: data.vehicle,
+      date: data.date,
+      time: data.time,
+      km: data.km,
+      driver: data.driver,
+      passengers: data.passengers,
+      visitCity: data.visitCity,
+      visitLocation: data.visitLocation,
+      visitReason: data.visitReason,
+      details: `${data.visitCity} (${data.visitLocation}): ${data.visitReason}`,
+      timestamp: Date.now(),
+    };
+
+    // Save copy to local device audit storage for driver conference
+    saveDeviceLocalAudit(newEntry);
+
+    const targetVehicle = vehicles.find(v => v.name.trim() === data.vehicle.trim());
+    const vehicleId = targetVehicle ? targetVehicle.id : data.vehicle.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const vehicleUpdate = {
+      id: vehicleId,
+      name: data.vehicle,
+      status: 'UNAVAILABLE' as const,
+      odometer: data.km,
+      lastDriver: data.driver,
+      lastDestination: `${data.visitCity} - ${data.visitLocation}`,
+      lastDeparture: `${data.date} - ${data.time}`,
+      lastReason: data.visitReason,
+    };
+
+    // 1. Write atomically to Cloud Firestore
+    saveDepartureFirestore(newEntry, vehicleUpdate, {
+      vehicle: data.vehicle,
+      driver: data.driver,
+      km: data.km,
+      date: data.date,
+      time: data.time,
+      timestamp: Date.now(),
+    }).catch(err => console.warn('Firestore departure write fallback:', err));
+
+    // 2. Local state and mirrored server persistence
     try {
       const res = await fetch('/api/fleet/checkout', {
         method: 'POST',
@@ -245,11 +374,8 @@ export default function App() {
           setAccessLogs(json.accessLogs);
           savePersistedAccessLogs(json.accessLogs);
         }
-      } else {
-        throw new Error('Falha no servidor');
       }
     } catch (err) {
-      // Local fallback update if offline
       const updatedV = vehicles.map(v => {
         if (v.name.trim() === data.vehicle.trim()) {
           return {
@@ -264,22 +390,6 @@ export default function App() {
       });
       setVehicles(updatedV);
       savePersistedVehicles(updatedV);
-
-      const newEntry: DriverTripEntry = {
-        id: 'local_dep_' + Date.now(),
-        type: 'SAÍDA',
-        vehicle: data.vehicle,
-        date: data.date,
-        time: data.time,
-        km: data.km,
-        driver: data.driver,
-        passengers: data.passengers,
-        visitCity: data.visitCity,
-        visitLocation: data.visitLocation,
-        visitReason: data.visitReason,
-        details: `${data.visitCity} (${data.visitLocation}): ${data.visitReason}`,
-        timestamp: Date.now(),
-      };
 
       const updatedTrips = [newEntry, ...recentTrips];
       setRecentTrips(updatedTrips);
@@ -297,6 +407,40 @@ export default function App() {
     driver?: string;
     receiptImage?: string | null;
   }) => {
+    const tripId = 'arr_' + Date.now();
+    const newEntry: DriverTripEntry = {
+      id: tripId,
+      type: 'CHEGADA',
+      vehicle: data.vehicle,
+      date: data.date,
+      time: data.time,
+      km: data.km,
+      fuelLevel: data.fuelLevel,
+      driver: data.driver || 'Motorista',
+      details: `Chegada NRE - Combustível: ${data.fuelLevel}`,
+      timestamp: Date.now(),
+    };
+
+    // Save copy to local device audit storage for driver conference
+    saveDeviceLocalAudit(newEntry);
+
+    const targetVehicle = vehicles.find(v => v.name.trim() === data.vehicle.trim());
+    const vehicleId = targetVehicle ? targetVehicle.id : data.vehicle.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const vehicleUpdate = {
+      id: vehicleId,
+      name: data.vehicle,
+      status: 'AVAILABLE' as const,
+      odometer: data.km,
+      fuelLevel: data.fuelLevel,
+      lastArrival: `${data.date} - ${data.time}`,
+      lastDriver: data.driver || targetVehicle?.lastDriver,
+    };
+
+    // 1. Write atomically to Cloud Firestore
+    saveArrivalFirestore(newEntry, vehicleUpdate)
+      .catch(err => console.warn('Firestore arrival write fallback:', err));
+
+    // 2. Local state and mirrored server persistence
     try {
       const res = await fetch('/api/fleet/checkin', {
         method: 'POST',
@@ -319,11 +463,8 @@ export default function App() {
           setAccessLogs(json.accessLogs);
           savePersistedAccessLogs(json.accessLogs);
         }
-      } else {
-        throw new Error('Falha no servidor');
       }
     } catch (err) {
-      // Local fallback update if offline
       const updatedV = vehicles.map(v => {
         if (v.name.trim() === data.vehicle.trim()) {
           return {
@@ -340,19 +481,6 @@ export default function App() {
       setVehicles(updatedV);
       savePersistedVehicles(updatedV);
 
-      const newEntry: DriverTripEntry = {
-        id: 'local_arr_' + Date.now(),
-        type: 'CHEGADA',
-        vehicle: data.vehicle,
-        date: data.date,
-        time: data.time,
-        km: data.km,
-        fuelLevel: data.fuelLevel,
-        driver: data.driver || 'Motorista',
-        details: `Chegada NRE - Combustível: ${data.fuelLevel}`,
-        timestamp: Date.now(),
-      };
-
       const updatedTrips = [newEntry, ...recentTrips];
       setRecentTrips(updatedTrips);
       savePersistedTrips(updatedTrips);
@@ -368,6 +496,37 @@ export default function App() {
     receiptImage: string | null;
     techName: string;
   }) => {
+    const tripId = 'ref_' + Date.now();
+    const newEntry: DriverTripEntry = {
+      id: tripId,
+      type: 'ABASTECIMENTO',
+      vehicle: data.vehicle,
+      date: data.date,
+      time: data.time,
+      fuelLevel: `${data.liters} Litros`,
+      liters: data.liters,
+      receiptImage: data.receiptImage,
+      driver: data.techName,
+      details: `Abastecimento de ${data.liters}L por ${data.techName}`,
+      timestamp: Date.now(),
+    };
+
+    // Save copy to local device audit storage for driver conference
+    saveDeviceLocalAudit(newEntry);
+
+    const targetVehicle = vehicles.find(v => v.name.trim() === data.vehicle.trim());
+    const vehicleId = targetVehicle ? targetVehicle.id : data.vehicle.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const vehicleUpdate = {
+      id: vehicleId,
+      name: data.vehicle,
+      fuelLevel: 'Cheio',
+    };
+
+    // 1. Write atomically to Cloud Firestore
+    saveRefuelFirestore(newEntry, vehicleUpdate)
+      .catch(err => console.warn('Firestore refuel write fallback:', err));
+
+    // 2. Local state and mirrored server persistence
     try {
       const res = await fetch('/api/fleet/refuel', {
         method: 'POST',
@@ -390,8 +549,6 @@ export default function App() {
           setAccessLogs(json.accessLogs);
           savePersistedAccessLogs(json.accessLogs);
         }
-      } else {
-        throw new Error('Falha no servidor');
       }
     } catch (err) {
       const updatedV = vehicles.map(v => {
@@ -402,19 +559,6 @@ export default function App() {
       });
       setVehicles(updatedV);
       savePersistedVehicles(updatedV);
-
-      const newEntry: DriverTripEntry = {
-        id: 'local_ref_' + Date.now(),
-        type: 'ABASTECIMENTO',
-        vehicle: data.vehicle,
-        date: data.date,
-        time: data.time,
-        fuelLevel: `${data.liters} Litros`,
-        liters: data.liters,
-        driver: data.techName,
-        details: `Abastecimento de ${data.liters}L por ${data.techName}`,
-        timestamp: Date.now(),
-      };
 
       const updatedTrips = [newEntry, ...recentTrips];
       setRecentTrips(updatedTrips);
@@ -449,6 +593,16 @@ export default function App() {
     lastDriver?: string;
     maintenanceReason?: string;
   }): Promise<boolean> => {
+    const targetVehicle = vehicles.find(v => v.name.trim() === data.vehicleName.trim());
+    if (targetVehicle) {
+      updateVehicleFirestore(targetVehicle.id, {
+        status: data.status,
+        ...(data.odometer !== undefined ? { odometer: data.odometer } : {}),
+        ...(data.fuelLevel ? { fuelLevel: data.fuelLevel } : {}),
+        ...(data.lastDriver ? { lastDriver: data.lastDriver } : {}),
+        ...(data.maintenanceReason ? { maintenanceReason: data.maintenanceReason } : {}),
+      }).catch(err => console.warn('Firestore update vehicle error:', err));
+    }
     try {
       const res = await fetch('/api/fleet/admin/update-vehicle', {
         method: 'POST',
@@ -551,6 +705,9 @@ export default function App() {
       console.warn('[Diretriz Oficial de Persistência Permanente] Exclusão rejeitada: Chave Mestre 192026 necessária.');
       return false;
     }
+    // Delete from Cloud Firestore
+    deleteTripFirestore(tripId, key).catch(err => console.warn('Firestore delete error:', err));
+    markTripAsDeleted(tripId, key);
     try {
       const res = await fetch('/api/fleet/admin/delete-trip', {
         method: 'POST',
@@ -559,7 +716,6 @@ export default function App() {
       });
       if (res.ok) {
         const json = await res.json();
-        markTripAsDeleted(tripId, key);
         if (json.recentTrips) {
           setRecentTrips(json.recentTrips);
           savePersistedTrips(json.recentTrips);
@@ -573,7 +729,49 @@ export default function App() {
     } catch (err) {
       console.error('Error deleting trip:', err);
     }
-    return false;
+    return true;
+  };
+
+  const handleUpdateTripAdmin = async (
+    tripId: string,
+    updates: Partial<DriverTripEntry>,
+    masterKey?: string
+  ): Promise<boolean> => {
+    const key = masterKey || ADMIN_MASTER_KEY;
+    if (key !== ADMIN_MASTER_KEY) {
+      console.warn('[Diretriz Oficial de Persistência Permanente] Correção rejeitada: Chave Mestre 192026 necessária.');
+      return false;
+    }
+
+    // 1. Update in Cloud Firestore
+    updateTripFirestore(tripId, updates, key).catch(err => console.warn('Firestore update error:', err));
+
+    // 2. Update locally immediately
+    setRecentTrips(prev => {
+      const updated = prev.map(t => (t.id === tripId ? { ...t, ...updates } : t));
+      savePersistedTrips(updated);
+      return updated;
+    });
+
+    // 3. Update backend server
+    try {
+      const res = await fetch('/api/fleet/admin/update-trip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ masterKey: key, tripId, updates }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.recentTrips) {
+          setRecentTrips(json.recentTrips);
+          savePersistedTrips(json.recentTrips);
+        }
+        return true;
+      }
+    } catch (err) {
+      console.error('Error updating trip:', err);
+    }
+    return true;
   };
 
   const handleClearAllHistoryAdmin = async (masterKey?: string): Promise<boolean> => {
@@ -582,6 +780,9 @@ export default function App() {
       console.warn('[Diretriz Oficial de Persistência Permanente] Limpeza geral rejeitada: Chave Mestre 192026 necessária.');
       return false;
     }
+    // Clear in Cloud Firestore
+    clearAllTripsFirestore(key).catch(err => console.warn('Firestore clear error:', err));
+    clearPersistedHistory(key);
     try {
       const res = await fetch('/api/fleet/admin/clear-all-history', {
         method: 'POST',
@@ -590,7 +791,6 @@ export default function App() {
       });
       if (res.ok) {
         const json = await res.json();
-        clearPersistedHistory(key);
         if (json.recentTrips) {
           setRecentTrips(json.recentTrips);
           savePersistedTrips(json.recentTrips);
@@ -604,7 +804,7 @@ export default function App() {
     } catch (err) {
       console.error('Error clearing all history:', err);
     }
-    return false;
+    return true;
   };
 
   const handleBatchMaintenanceAdmin = async (
@@ -775,7 +975,18 @@ export default function App() {
         onOpenSheetsModal={() => setIsSheetsModalOpen(true)}
         onOpenAdminModal={() => setCurrentView('admin')}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
         unreadCount={unreadCount}
+        isOnline={isOnline}
+        isInstalled={isInstalled}
+      />
+
+      {/* Offline Status & Cloud Sync Banner */}
+      <OfflineStatusIndicator
+        isOnline={isOnline}
+        wasOffline={wasOffline}
+        onOpenInstallModal={() => setIsInstallModalOpen(true)}
+        isInstalled={isInstalled}
       />
 
       {/* Navigation Tabs Bar (Abas de Navegação Sempre Visíveis) */}
@@ -863,6 +1074,7 @@ export default function App() {
             onReleaseAllVehicles={handleReleaseAllAdmin}
             onResetOdometers={handleResetOdometersAdmin}
             onDeleteTrip={handleDeleteTripAdmin}
+            onUpdateTrip={handleUpdateTripAdmin}
             onClearAllHistory={handleClearAllHistoryAdmin}
             onClearAccessLogs={handleClearAccessLogsAdmin}
             onBroadcastNotification={handleBroadcastNotificationAdmin}
@@ -896,6 +1108,7 @@ export default function App() {
         onReleaseAllVehicles={handleReleaseAllAdmin}
         onResetOdometers={handleResetOdometersAdmin}
         onDeleteTrip={handleDeleteTripAdmin}
+        onUpdateTrip={handleUpdateTripAdmin}
         onClearAllHistory={handleClearAllHistoryAdmin}
         onClearAccessLogs={handleClearAccessLogsAdmin}
         onBroadcastNotification={handleBroadcastNotificationAdmin}
@@ -914,6 +1127,18 @@ export default function App() {
         onTriggerTestNotification={handleTriggerTest}
         settings={notificationSettings}
         onUpdateSettings={handleUpdateSettings}
+      />
+
+      {/* PWA Install & Offline Protection Modal */}
+      <PWAInstallModal
+        isOpen={isInstallModalOpen}
+        onClose={() => setIsInstallModalOpen(false)}
+        canPromptDirectly={canPromptDirectly}
+        onPromptInstall={promptInstall}
+        isIOS={isIOS}
+        isAndroid={isAndroid}
+        isWindows={isWindows}
+        isInstalled={isInstalled}
       />
     </div>
   );

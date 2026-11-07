@@ -1,12 +1,16 @@
 import { Vehicle, DriverTripEntry, AccessLogEntry } from '../types';
 import { INITIAL_VEHICLES, INITIAL_RECENT_TRIPS } from '../data/initialData';
 
+export const SIX_MONTHS_DAYS = 180;
+export const SIX_MONTHS_MS = SIX_MONTHS_DAYS * 24 * 60 * 60 * 1000; // 180 days in milliseconds
+
 const STORAGE_KEYS = {
   VEHICLES: 'nre_fleet_vehicles_v2',
   TRIPS: 'nre_fleet_driver_trips_v2',
   ACCESS_LOGS: 'nre_fleet_access_logs_v2',
   DELETED_TRIP_IDS: 'nre_fleet_deleted_trip_ids_v2',
   LAST_SYNC: 'nre_fleet_last_sync_timestamp',
+  DEVICE_AUDIT_RECORDS: 'nre_device_local_audit_records_v2',
 };
 
 function isClient(): boolean {
@@ -14,6 +18,35 @@ function isClient(): boolean {
 }
 
 const MASTER_KEY = '192026';
+
+/**
+ * Checks whether a given record timestamp or date string is within the 6-month (180 days) active window.
+ * Returns true if the record is newer than 180 days ago.
+ */
+export function isWithinSixMonths(timestamp?: number, dateStr?: string): boolean {
+  const now = Date.now();
+  const sixMonthsAgo = now - SIX_MONTHS_MS;
+
+  if (typeof timestamp === 'number' && timestamp > 0) {
+    return timestamp >= sixMonthsAgo;
+  }
+
+  if (dateStr && typeof dateStr === 'string') {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      const day = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const year = parseInt(parts[2], 10);
+      const parsedTime = new Date(year, month, day).getTime();
+      if (!isNaN(parsedTime)) {
+        return parsedTime >= sixMonthsAgo;
+      }
+    }
+  }
+
+  // If timestamp or date is unavailable or unparseable, retain the record rather than dropping
+  return true;
+}
 
 /**
  * Loads deleted trip IDs (tombstones) so trips deleted by Admin with Master Key are never revived.
@@ -46,6 +79,59 @@ export function savePersistedDeletedTripIds(ids: Set<string> | string[]): void {
 }
 
 /**
+ * Dedicated Local Device Conference Store:
+ * Stores an indelible copy of every departure, arrival, or refuel recorded on THIS specific device.
+ * Retained for 6 months for driver audit and conference purposes.
+ */
+export function saveDeviceLocalAudit(entry: DriverTripEntry): void {
+  if (!isClient() || !entry || !entry.id) return;
+  try {
+    const current = getDeviceLocalAudit();
+    const existingIndex = current.findIndex(r => r.id === entry.id);
+    const updated = [...current];
+
+    const cleanEntry: DriverTripEntry = {
+      ...entry,
+      receiptImage: entry.receiptImage && entry.receiptImage.startsWith('data:') ? (entry.photoUrl || '') : entry.receiptImage,
+    };
+
+    if (existingIndex !== -1) {
+      updated[existingIndex] = cleanEntry;
+    } else {
+      updated.unshift(cleanEntry);
+    }
+
+    // Keep only records within 6 months
+    const filtered = updated.filter(r => isWithinSixMonths(r.timestamp, r.date));
+    localStorage.setItem(STORAGE_KEYS.DEVICE_AUDIT_RECORDS, JSON.stringify(filtered));
+  } catch (err) {
+    console.warn('Failed saving device local audit record:', err);
+  }
+}
+
+/**
+ * Retrieves records created on this specific device within the 6-month window.
+ */
+export function getDeviceLocalAudit(): DriverTripEntry[] {
+  if (!isClient()) return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DEVICE_AUDIT_RECORDS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const deletedSet = getPersistedDeletedTripIds();
+        return parsed
+          .filter(r => !deletedSet.has(r.id))
+          .filter(r => isWithinSixMonths(r.timestamp, r.date));
+      }
+    }
+  } catch (err) {
+    console.warn('Failed loading device local audit records:', err);
+  }
+  return [];
+}
+
+/**
  * Diretriz Oficial de Persistência Permanente:
  * Exclusão de registro permitida EXCLUSIVAMENTE mediante autenticação com a Chave Mestre 192026.
  */
@@ -59,10 +145,17 @@ export function markTripAsDeleted(tripId: string, masterKey?: string): boolean {
   deletedSet.add(tripId);
   savePersistedDeletedTripIds(deletedSet);
 
-  // Also remove from stored trips immediately
+  // Remove from stored trips
   const trips = getPersistedTrips();
   const filtered = trips.filter(t => t.id !== tripId);
   savePersistedTrips(filtered);
+
+  // Also remove from device audit if present
+  try {
+    const auditRecords = getDeviceLocalAudit().filter(r => r.id !== tripId);
+    localStorage.setItem(STORAGE_KEYS.DEVICE_AUDIT_RECORDS, JSON.stringify(auditRecords));
+  } catch {}
+
   return true;
 }
 
@@ -78,6 +171,7 @@ export function clearPersistedHistory(masterKey?: string): boolean {
   }
   try {
     localStorage.setItem(STORAGE_KEYS.TRIPS, JSON.stringify([]));
+    localStorage.setItem(STORAGE_KEYS.DEVICE_AUDIT_RECORDS, JSON.stringify([]));
     return true;
   } catch (err) {
     console.warn('Failed clearing trips from localStorage:', err);
@@ -86,7 +180,7 @@ export function clearPersistedHistory(masterKey?: string): boolean {
 }
 
 /**
- * Retrieves persisted trips from localStorage, excluding tombstones.
+ * Retrieves persisted trips from localStorage, excluding tombstones and expired records (> 6 months).
  */
 export function getPersistedTrips(): DriverTripEntry[] {
   if (!isClient()) return INITIAL_RECENT_TRIPS;
@@ -94,9 +188,12 @@ export function getPersistedTrips(): DriverTripEntry[] {
     const raw = localStorage.getItem(STORAGE_KEYS.TRIPS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         const deletedSet = getPersistedDeletedTripIds();
-        return parsed.filter(t => !deletedSet.has(t.id));
+        const active = parsed
+          .filter(t => !deletedSet.has(t.id))
+          .filter(t => isWithinSixMonths(t.timestamp, t.date));
+        if (active.length > 0) return active;
       }
     }
   } catch (err) {
@@ -106,7 +203,7 @@ export function getPersistedTrips(): DriverTripEntry[] {
 }
 
 /**
- * Persists trips into localStorage without artificial limits.
+ * Persists trips into localStorage with 6-month retention.
  */
 export function savePersistedTrips(trips: DriverTripEntry[]): void {
   if (!isClient() || !Array.isArray(trips)) return;
@@ -115,6 +212,7 @@ export function savePersistedTrips(trips: DriverTripEntry[]): void {
     // Strip large base64 image payloads so localStorage stays under browser quota and never drops records
     const cleanTrips = trips
       .filter(t => !deletedSet.has(t.id))
+      .filter(t => isWithinSixMonths(t.timestamp, t.date))
       .map(t => {
         const hasBase64 = t.receiptImage && typeof t.receiptImage === 'string' && t.receiptImage.startsWith('data:');
         return {

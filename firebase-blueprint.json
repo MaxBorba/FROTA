@@ -1,0 +1,154 @@
+{
+  "entities": {
+    "Vehicle": {
+      "title": "Vehicle",
+      "description": "Informações e status operacional dos veículos da frota NRE Maringá",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "maxLength": 100 },
+        "model": { "type": "string", "maxLength": 100 },
+        "plate": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["AVAILABLE", "UNAVAILABLE", "MAINTENANCE"] },
+        "fuelLevel": { "type": "string", "maxLength": 50 },
+        "odometer": { "type": "number" },
+        "lastDriver": { "type": "string", "maxLength": 100 },
+        "lastDestination": { "type": "string", "maxLength": 200 },
+        "lastDeparture": { "type": "string", "maxLength": 50 },
+        "lastArrival": { "type": "string", "maxLength": 50 },
+        "lastReason": { "type": "string", "maxLength": 300 },
+        "maintenanceReason": { "type": "string", "maxLength": 300 },
+        "maintenanceDate": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "plate", "status", "odometer", "fuelLevel"]
+    },
+    "DriverTrip": {
+      "title": "DriverTrip",
+      "description": "Registro permanente de saída, chegada ou abastecimento da frota",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["SAÍDA", "CHEGADA", "ABASTECIMENTO"] },
+        "vehicle": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "maxLength": 20 },
+        "time": { "type": "string", "maxLength": 20 },
+        "km": { "type": "number" },
+        "driver": { "type": "string", "maxLength": 100 },
+        "passengers": { "type": "string", "maxLength": 300 },
+        "visitCity": { "type": "string", "maxLength": 100 },
+        "visitLocation": { "type": "string", "maxLength": 200 },
+        "visitReason": { "type": "string", "maxLength": 500 },
+        "fuelLevel": { "type": "string", "maxLength": 50 },
+        "liters": { "type": "number" },
+        "receiptImage": { "type": "string", "maxLength": 500000 },
+        "details": { "type": "string", "maxLength": 500 },
+        "platform": { "type": "string", "maxLength": 100 },
+        "device": { "type": "string", "maxLength": 100 },
+        "ip": { "type": "string", "maxLength": 64 },
+        "photoUrl": { "type": "string", "maxLength": 500 },
+        "driveUrl": { "type": "string", "maxLength": 500 },
+        "timestamp": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["id", "type", "vehicle", "date", "time", "driver", "timestamp"]
+    },
+    "AccessLog": {
+      "title": "AccessLog",
+      "description": "Registro de auditoria de acessos e ações na aplicação",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "timestamp": { "type": "number" },
+        "date": { "type": "string", "maxLength": 20 },
+        "time": { "type": "string", "maxLength": 20 },
+        "ip": { "type": "string", "maxLength": 64 },
+        "userAgent": { "type": "string", "maxLength": 300 },
+        "device": { "type": "string", "maxLength": 100 },
+        "action": { "type": "string", "maxLength": 100 },
+        "details": { "type": "string", "maxLength": 500 },
+        "driverName": { "type": "string", "maxLength": 100 },
+        "sessionDuration": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "date", "time", "action"]
+    },
+    "ActiveCheckout": {
+      "title": "ActiveCheckout",
+      "description": "Sessão ativa de veículo em trânsito para conferência de checkout",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "vehicle": { "type": "string", "maxLength": 100 },
+        "driver": { "type": "string", "maxLength": 100 },
+        "km": { "type": "number" },
+        "date": { "type": "string", "maxLength": 20 },
+        "time": { "type": "string", "maxLength": 20 },
+        "ip": { "type": "string", "maxLength": 64 },
+        "device": { "type": "string", "maxLength": 100 },
+        "timestamp": { "type": "number" },
+        "photoUrl": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["id", "vehicle", "driver", "km", "date", "time", "timestamp"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil de usuário e motorista autenticado via Firebase Auth",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 150 },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["driver", "admin"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "Notificações do sistema para os motoristas e administradores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "maxLength": 100 },
+        "message": { "type": "string", "maxLength": 500 },
+        "type": { "type": "string", "enum": ["RETURN_REMINDER", "MAINTENANCE_ALERT", "STATUS_CHANGE", "BROADCAST", "FUEL_ALERT", "INFO"] },
+        "timestamp": { "type": "number" },
+        "read": { "type": "boolean" },
+        "vehicleName": { "type": "string", "maxLength": 100 },
+        "driver": { "type": "string", "maxLength": 100 },
+        "urgent": { "type": "boolean" }
+      },
+      "required": ["id", "title", "message", "type", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/vehicles/{vehicleId}": {
+      "schema": "Vehicle",
+      "description": "Coleção de veículos da frota com status operacional e odômetro atual"
+    },
+    "/trips/{tripId}": {
+      "schema": "DriverTrip",
+      "description": "Coleção permanente de saídas, chegadas e abastecimentos registrados pelos motoristas"
+    },
+    "/accessLogs/{logId}": {
+      "schema": "AccessLog",
+      "description": "Auditoria de registros de acesso ao app e ações operacionais"
+    },
+    "/activeCheckouts/{checkoutId}": {
+      "schema": "ActiveCheckout",
+      "description": "Controle temporário de veículos em trânsito até o registro de chegada"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Perfis de usuários motoristas e administradores da frota"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "AppNotification",
+      "description": "Avisos e alertas emitidos pelo sistema de frota"
+    }
+  }
+}
